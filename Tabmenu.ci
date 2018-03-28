@@ -1,5 +1,5 @@
 //----------------------------------------------------------------------------------
-//	Copyright © 2015 Schneider Electric (Australia) Pty Ltd. All rights reserved.
+//	Copyright Â© 2015 Schneider Electric (Australia) Pty Ltd. All rights reserved.
 //
 // 	FILE:		Tabmenu.ci
 //
@@ -135,7 +135,7 @@ INT		m_Tabmenu_PreSelectedItemType	[9];		// The type of the tabmenu item (0 = ta
 INT		m_Tabmenu_PreSelectedPageScan	[9];		// The page scan when the tab menu item is selcted (this is used to determined if new page is displayed)
 INT		m_Tabmenu_SelectedTab			[9];		// The index of the tab that is currently selected
 STRING	m_Tabmenu_SelectedTabName		[9];		// The name of the tab that is currently selected (this is used for page transition as tab may appear / disappear)
-INT		m_Tabmenu_SelectedButton		[9] = -1, -1, -1, -1, -1, -1, -1, -1, -1;	// Reserved for future use - the index of the button that has justed been selected
+INT		m_Tabmenu_SelectedButton		[9];// = -1, -1, -1, -1, -1, -1, -1, -1, -1;	// Reserved for future use - the index of the button that has justed been selected
 INT		m_Tabmenu_FirstMenuConfigTab	[9];		// The number of tabs between the first tab configured in menu configuration (config.) and the first tab displayed on screen
 INT		m_Tabmenu_FirstMenuConfigButton	[9];		// The number of buttons between the first button configured in menu config. and the first button displayed on screen
 
@@ -1652,6 +1652,8 @@ END
 
 INT FUNCTION Tabmenu_Button_Hidden(INT buttonID, INT isMaster = 0)
 	INT tabmenuID = _Tabmenu_GetInstance();
+	
+
 
 	IF (tabmenuID < 0) THEN
 		RETURN 1;
@@ -2030,7 +2032,7 @@ END
 //		0 if executed successfully or -1 if failed
 //
 //-----------------------------------------------------------------------------
-
+/* guru 
 INT FUNCTION Tabmenu_Button_Select(INT buttonID)
 	INT tabmenuID = _Tabmenu_GetInstance();
 	INT handle;
@@ -2060,6 +2062,53 @@ INT FUNCTION Tabmenu_Button_Select(INT buttonID)
 
 	RETURN 0;
 END
+guru */
+
+INT FUNCTION Tabmenu_Button_Select(INT buttonID, INT noRefresh = 0)
+	INT tabmenuID = _Tabmenu_GetInstance();
+	INT handle;
+	INT tabID;
+
+	IF (tabmenuID < 0) THEN
+		RETURN -1;
+	END
+	IF (m_Tabmenu_ButtonFocusDisallowed[tabmenuID]) THEN
+		RETURN -1;
+	END
+// Reset button settings if changing tab
+	IF (m_Tabmenu_Selectedbutton[tabmenuID] <> ButtonID) THEN
+		m_Tabmenu_SelectedButton[tabmenuID] = ButtonID;
+		m_Tabmenu_SelectedTab[tabmenuID] = tabID;
+		m_Tabmenu_FirstMenuConfigButton[tabmenuID] = 0;
+	END
+	IF (0 = noRefresh) THEN
+		// Update buttons from menu configuration
+		//m_Tabmenu_ButtonFocusDisallowed[tabmenuID] = 1;
+
+		//_Tabmenu_LoadMenuConfig(tabmenuID, tabID);
+		SleepMS(_Tabmenu_GetAnmDelayTime());
+
+		//m_Tabmenu_ButtonFocusDisallowed[tabmenuID] = 0;
+	END
+
+
+	// execute command
+	handle = _Tabmenu_Button_IntMetadata(tabmenuID, buttonID, "MenuConfigHandle");
+	IF (_Tabmenu_GetMenuConfigHasCommand(handle)) THEN // if command is defined against the button
+
+		// pre-select the button, so that it will be highlighted after page is changed
+		_Tabmenu_PreSelectedItemSet(tabmenuID, 0, buttonID, _Tabmenu_GetMenuConfigText(handle), StrToInt(PageInfo(7)));
+
+		_Tabmenu_ExecuteCommand(handle);
+	// guru ELSE
+		// if no command, show the dropdown menu instead
+		// guru Tabmenu_Button_SelectMenu(buttonID);
+	END
+
+	RETURN 0;
+END
+
+
 
 //-----------------------------------------------------------------------------
 //
