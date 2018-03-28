@@ -1,0 +1,183 @@
+//--------------------------------------------------------------------------------
+//	Copyright © 2015 Schneider Electric (Australia) Pty Ltd. All rights reserved.
+//
+// 	FILE:		TabTree.ci
+//
+//	CREATED:	19/06/2012
+//
+//	SUMMARY:
+//
+//		Contains related functions to instantiate splitter control (for tab style
+//		templates) on CitectSCADA windows uisng the slider genie to control the
+//		placement of the equiptree genie and table genies (all provided in the
+//		Library_Controls project) on a page. Templates that use them are:
+//		- databrowse
+//		- alarm_equip
+//		- disabled_equip
+//		- soe_equip
+//		- summary_equip
+//
+//	PUBLIC FUNCTIONS:
+//
+//		TabTree_SplitChanged
+//
+//		TabEqTree_HasCluster
+//		TabEq_GetCluster
+//
+//	USAGE:
+//		The lib_controls.slider genie should be pasted on a page / template
+//		that have tree (or its derived version) genie on the left hand side and
+//		a table (or its derived version) genie on the right.
+//
+//		Multiple sliders could be pasted on a page. Each of the sliders
+//		within a page should be assigned a unique slider ID as its name.
+//
+//		The following functions should be assigned to the corresponding fields
+//		in the genie:
+//		- Initialize:
+//		- Callback:			TabTree_SplitChange("#Name",#AbsOffset[,"<tree ID@LHS>","<table ID@RHS>"])
+//		- Right Mouse:
+//
+//-----------------------------------------------------------------------------
+
+
+//-----------------------------------------------------------------------------
+//
+//	Splitter Functions for the specified page templates above
+//
+//-----------------------------------------------------------------------------
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		TabTree_SplitChanged
+//
+//	SUMMARY:
+//		Callback function to response to the callback event of the lib_controls.Slider
+//		genie when its offset (position relative to its initial position) changes.
+//			
+//	PARAMS:
+//		sliderID		- The slider name
+//		pxAbsOffset		- The offset (in pixels) of the slider relative to its initial pos.
+//		TreeID			- The name of the tree genie, default to "" if not specified.
+//		tableID			- The name of the table genie, default to "" if not specified.
+//
+//	RETURNS: 
+//		None
+//
+//-----------------------------------------------------------------------------
+
+FUNCTION TabTree_SplitChanged(STRING sliderID, INT pxAbsOffset, STRING treeID = "", STRING tableID = "")
+	STRING treeHSBarID;
+	STRING treeVSBarID;
+	STRING tableHSBarID;
+	INT pxWidth;
+	INT isDocked = LibSlider_GetPropertyInt(sliderID, "IsDocked");
+
+	// resize and move the controls on the left of the slider
+	IF (treeID <> "") THEN
+		// adjust tree
+		IF PageGetStr(treeID + "_WidthInit") = "" THEN
+			PageSetStr(treeID + "_WidthInit", LibTree_GetPropertyInt(treeID, "Width"));
+		END
+		IF (isDocked) THEN
+			pxWidth = 0;
+		ELSE
+			pxWidth = StrToInt(PageGetStr(treeID + "_WidthInit")) + pxAbsOffset;
+		END
+		LibTree_SetPropertyInt(treeID, "Width", pxWidth);
+
+		// adjust horizontal scrollbar if it exists
+		treeHSBarID = LibTree_GetProperty(treeID, "SBarHorz");
+		IF (treeHSBarID <> "") THEN
+			IF PageGetStr(treeHSBarID + "_WidthInit") = "" THEN
+				PageSetStr(treeHSBarID + "_WidthInit", LibScrollBar_GetPropertyInt(treeHSBarID, "Width"));
+			END
+			IF (isDocked) THEN
+				LibScrollBar_SetProperty(treeHSBarID, "HiddenWhen", TRUE);
+			ELSE
+				LibScrollBar_SetProperty(treeHSBarID, "HiddenWhen", FALSE);
+				pxWidth = StrToInt(PageGetStr(treeHSBarID + "_WidthInit")) + pxAbsOffset;
+				LibScrollBar_SetProperty(treeHSBarID, "Length", pxWidth);
+			END
+		END
+
+		// adjust vertical scrollbar if it exists
+		treeVSBarID = LibTree_GetProperty(treeID, "SBarVert");
+		IF (treeVSBarID <> "") THEN
+			IF (isDocked) THEN
+				LibScrollBar_SetProperty(treeVSBarID, "HiddenWhen", TRUE);
+			ELSE
+				LibScrollBar_SetProperty(treeVSBarID, "HiddenWhen", FALSE);
+				LibScrollBar_SetProperty(treeVSBarID, "MoveHorz", pxAbsOffset);
+			END
+		END
+	END
+
+	// resize and move controls on the right of the slider
+	IF (tableID <> "") THEN
+		// adjust table
+		IF PageGetStr(tableID + "_WidthInit") = "" THEN
+			PageSetStr(tableID + "_WidthInit", LibTable_GetPropertyInt(tableID, "Width"));
+		END
+		pxWidth = StrToInt(PageGetStr(tableID + "_WidthInit")) - pxAbsOffset;
+		LibTable_SetPropertyInt(tableID, "Width", pxWidth);
+		LibTable_SetPropertyInt(tableID, "MoveHorz", pxAbsOffset);
+
+		// adjust horizontal scrollbar if it exists
+		tableHSBarID = LibTable_GetProperty(tableID, "SBarHorz")
+		IF (tableHSBarID <> "") THEN
+			IF PageGetStr(tableHSBarID + "_WidthInit") = "" THEN
+				PageSetStr(tableHSBarID + "_WidthInit", LibScrollBar_GetPropertyInt(tableHSBarID, "Width"));
+			END
+			pxWidth = StrToInt(PageGetStr(tableHSBarID + "_WidthInit")) - pxAbsOffset;
+			LibScrollBar_SetPropertyInt(tableHSBarID, "Length", pxWidth);
+			LibScrollBar_SetPropertyInt(tableHSBarID, "MoveHorz", pxAbsOffset);
+		END
+	END
+END
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		TabEqTree_HasCluster
+//
+//	SUMMARY:
+//		Checks whether the equipment names returned from the equiptree control
+//		has <cluster>. prefix.
+//
+//	PARAMS:
+//		treeName		- The name of the equipment tree
+//			
+//	RETURNS:
+//		0 if value is set successfully or error code if not
+//
+//-----------------------------------------------------------------------------
+
+INT FUNCTION TabEqTree_HasCluster(STRING treeName)
+	RETURN _LibControl_GetInt("_eqtree_"+treeName, "ShowCluster");
+END
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		TabEquip_GetCluster
+//
+//	SUMMARY:
+//		Gets the cluster part of the equipment name.
+//
+//	PARAMS:
+//		equipName		- The name of the equipment with <cluster>. prefix
+//			
+//	RETURNS:
+//		The cluster part of the equipment name
+//
+//-----------------------------------------------------------------------------
+
+STRING FUNCTION TabEquip_GetCluster(STRING equipName)
+	INT clusterSep = StrSearch(0, equipName, ".");
+	IF (clusterSep < 0) THEN
+		RETURN equipName;
+	END
+	RETURN StrLeft(equipName, clusterSep);
+END

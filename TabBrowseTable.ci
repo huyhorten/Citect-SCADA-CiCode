@@ -1,0 +1,537 @@
+//--------------------------------------------------------------------------------
+//	Copyright © 2015 Schneider Electric (Australia) Pty Ltd. All rights reserved.
+//
+// 	FILE:		TabBrowseTable.ci
+//
+//	CREATED:	19/04/2012
+//
+//	SUMMARY:
+//
+//		Contains related functions to instantiate data browse table (for tab style
+//		templates) on CitectSCADA windows uisng the browse table genie and equiptree
+//		genie provided in the Library_Controls project. Templates that use them are:
+//		- databrowse
+//
+//	PUBLIC FUNCTIONS:
+//
+//		TabBrowseTable_SetFilter
+//		TabBrowseTable_RClick
+//
+//		TabTagTable_Row_ShowContextMenu
+//
+//	USAGE:
+//		The lib_controls.browsetable genie should be pasted on a page / template.
+//
+//		Multiple browse tables could be pasted on a page. Each of the tables
+//		within a page should be assigned a unique table ID as its name.
+//
+//		The following functions should be assigned to the corresponding fields
+//		in the genie:
+//		- Initialize:
+//		- Left Mouse:
+//		- Right Mouse:		TabBrowseTable_RClick("#Name",#Row,#ColIdx)
+//		- Double clk:
+//		- Table Reload:
+//
+//		To use the equipment tree displayed to filter the browse table, assign
+//		the function to the corresponding fields in the equiptree genie:
+//		- Initialize:
+//		- Left Mouse:		TabBrowseTable_SetFilter("<tableID>","<predefined filter>","#Ref",#IsParent)
+//		- Right Mouse:
+//		- Double clk:
+//		- Table Reload:
+//
+//		To provide background highlight for the row selection in the table Each
+//		of the rows is represented by the lib_controls.tablerow genie, and be
+//		assigned a unique row ID. The ID should start from 1, and be incrementd
+//		by 1 for the next row and so on.
+//
+//-----------------------------------------------------------------------------
+
+
+//-----------------------------------------------------------------------------
+//
+//	Browse Table Functions - applicable to all types of data browse
+//
+//-----------------------------------------------------------------------------
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		TabBrowseTable_SetFilter
+//
+//	SUMMARY:
+//		Sets the filter for the data browse session with the specified equipment
+//		and reload the data on the table.
+//			
+//	PARAMS:
+//		tableID			- The table name
+//		filter			- The other filter to be applied to the data browse sesion
+//		equipment		- The name of equipment to be filtered
+//		isParent		- whether the equipment is a parent device (that has children)
+//		eqTreeID		- The equipment tree ID
+//			
+//	RETURNS: 
+//		0 if successful or error number if failed
+//
+//-----------------------------------------------------------------------------
+
+INT FUNCTION TabBrowseTable_SetFilter(STRING tableID, STRING filter = "", STRING equipment = "", INT isParent = FALSE, STRING eqTreeID = "")
+	STRING browseOpenFn = LibBrowseTable_GetProperty(tableID, "BrowseOpenFn");
+	STRING equipField = "Equipment";
+	STRING cluster = "";
+
+	IF ("" <> equipment AND "ServerBrowseOpen" <> browseOpenFn) THEN
+		// work out variations between different browse types
+		SELECT CASE browseOpenFn
+		CASE "EquipBrowseOpen"
+			equipField = "Name";
+			isParent = FALSE;			// browse filter does not support OR clause
+		CASE "AccumBrowseOpen"
+			isParent = FALSE;			// browse filter does not support OR clause
+		CASE "TrnBrowseOpen"
+			isParent = FALSE;			// browse filter does not support OR clause
+		END SELECT
+
+		// add cluster filter criteria
+		IF ("" <> eqTreeID) THEN
+			IF (TabEqTree_HasCluster(eqTreeID)) THEN
+				cluster = TabEquip_GetCluster(equipment);
+				IF (cluster = equipment) THEN
+					equipment = "";
+				ELSE
+					equipment = StrRight(equipment, StrLength(equipment) - StrLength(cluster) - 1);
+				END
+				cluster = "Cluster=" + cluster;
+			END
+		END
+
+		// add equipment filter criteria
+		IF ("" <> equipment) THEN
+			IF (isParent) THEN
+				equipment = equipField + "=" + equipment + " OR " + equipField + "=" + equipment + ".*";
+			ELSE
+				equipment = equipField + "=" + equipment;
+			END
+			IF ("" <> cluster) THEN
+				equipment = cluster + ";" + equipment;
+			END
+		ELSE
+			equipment = cluster;
+		END
+
+		// add table filter criteria
+		IF ("" <> filter) THEN
+			filter = filter + ";" + equipment;
+		ELSE
+			filter = equipment;
+		END
+	END
+	LibBrowseTable_SetProperty(tableID, "Filter", filter);
+
+	// clear selection
+	LibTable_ClearSelected(tableID);
+
+	RETURN 0;
+END
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		TabBrowseTable_RClick
+//
+//	SUMMARY:
+//		Callback function to the right-click event of the lib_controls.BrowseTable
+//		genie used on one of the tab style alarm templates
+//
+//		The function pops up the context menu for the selected rows. If the
+//		user invokes the context menu outside of the selected row range, the
+//		existing selected rows will be deselected and the current row will be
+//		automatically selected prior to popping up the context menu.
+//
+//		If the user right-clicks on the column header (table row 0), nothing will
+//		appear as no context menu has been implemented for columns.
+//
+//	PARAMS:
+//		tableID			- The table name
+//		tblRowID		- The row ID number counting from 1st record bound to the
+//						  table, one-based
+//							row number zero (0) refers to the column heading row
+//		tblColIdx		- The column index number, one-indexed
+//							This is optional, if not specified, the action taken
+//							will be applied to an addition column
+//		privilege		- The privilege required for operation
+//							If no privilege is specified, no operation is allowed
+//			
+//	RETURNS: 
+//		0 if executed successfully or error code if failed
+//
+//-----------------------------------------------------------------------------
+
+INT FUNCTION TabBrowseTable_RClick(STRING tableID, INT tblRowID, INT tblColIdx = 0, STRING privilege = "")
+	INT privInt;
+
+	IF (tblRowID > 0) THEN
+		privilege = StrTrim(privilege);
+		IF ("" = privilege) THEN
+			privInt = -1;
+		ELSE
+			IsError();
+			privInt = StrToInt(privilege);
+			IF (0 <> IsError()) THEN
+				privInt = -1;
+			END
+		END
+		RETURN TabBwsTable_Row_ShowContextMenu(tableID, tblRowID, privInt);
+	END
+
+	RETURN 0;
+END
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		_TabBwsTable_Row_ShowContextMenu
+//
+//	SUMMARY:
+//		Shows the context menu for the selected rows in the browse table. The
+//		menu is browse type sensitive, and will pop up a different menu depending
+//		on the browse type.
+//
+//	PARAMS:
+//		tableID			- The table name
+//		tblRowID		- The row ID number counting from 1st record bound to the
+//						  table, one-indexed
+//		privilege		- The privilege required to operate
+//
+//	RETURNS:
+//		0 if executed successfully or error code if failed
+//
+//-----------------------------------------------------------------------------
+
+PRIVATE
+INT FUNCTION TabBwsTable_Row_ShowContextMenu(STRING tableID, INT tblRowID, INT privilege = -1)
+	// select the row if it's not already selected
+	IF (NOT LibTable_IsRowSelected(tableID, tblRowID)) THEN
+		LibTable_SelectRow(tableID, tblRowID);
+	END
+
+	// show different context menu depending on the browse type
+	STRING browseOpenFn = LibBrowseTable_GetProperty(tableID, "BrowseOpenFn");
+	INT error;
+
+	SELECT CASE browseOpenFn
+	CASE "TagBrowseOpen"
+		error = TabTagTable_Row_ShowContextMenu(tableID, tblRowID, privilege);
+	// TODO: add context menu for other types of data browse if required
+	CASE ELSE
+		error = TabBwsTable_ShowDefaultMenu();
+	END SELECT
+
+	RETURN error;
+END
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		_TabBwsTable_ShowDefaultMenu
+//
+//	SUMMARY:
+//		Shows the default context menu for the browse table when it cannot works
+//		out what specific menu shoule be shown.
+//
+//	PARAMS:
+//		text	- text for the default menu item
+//
+//	RETURNS:
+//		0
+//
+//-----------------------------------------------------------------------------
+
+INT FUNCTION TabBwsTable_ShowDefaultMenu(STRING text = "")
+	IF ("" = text) THEN
+		text = "@(No options available)"
+	END
+	DspPopupMenu(0, "!" + StrToLocalText(text));
+	DspPopupMenu(-1);
+	RETURN 0;
+END
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		_TabBwsTable_GetPriv
+//
+//	SUMMARY:
+//		Checks whether the currently logon user has sufficient privilege to
+//		the specified area.
+//
+//	PARAMS:
+//		privilege		- The privilege level required
+//		area			- The area of privilege, default to 0
+//
+//	RETURNS:
+//		1 if the user has the specified privilege in the area, or 0 (zero)
+//		if the user does not have the privilege
+//
+//-----------------------------------------------------------------------------
+
+PRIVATE
+INT FUNCTION _TabBwsTable_GetPriv(INT privilege, INT area = 0)
+	IF (privilege < 0) THEN
+		RETURN FALSE;
+	END
+
+	IF ("0" = UserInfo(0)) THEN
+		RETURN FALSE;
+	END
+
+	RETURN GetPriv(privilege, area);
+END
+
+
+//-----------------------------------------------------------------------------
+//
+//	Functions specific to browse table displaying variable tags
+//
+//-----------------------------------------------------------------------------
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		TabTagTable_Row_ShowContextMenu
+//
+//	SUMMARY:
+//		Shows the context menu for the selected rows in the browse table
+//		displaying variable tag browse.
+//
+//	PARAMS:
+//		tableID			- The table name
+//		tblRowID		- The row ID number counting from 1st record bound to the
+//						  table, one-indexed
+//		privilege		- The privilege required to operate
+//
+//	RETURNS:
+//		0 if executed successfully or error code if failed
+//
+//-----------------------------------------------------------------------------
+
+INT FUNCTION TabTagTable_Row_ShowContextMenu(STRING tableID, INT tblRowID, INT privilege = -1)
+	STRING tagName = "";
+	STRING cluster = "";
+	INT overrideMode = -1;
+	INT controlMode = -1;
+	STRING fieldChanged = "";
+	INT selection;
+	STRING newValue;
+	INT error = 274;
+	STRING disabled = "";
+
+	// check if has the Tag column
+	IF (LibTable_GetColByRef(tableID, "Tag") < 1) THEN
+		TabBwsTable_ShowDefaultMenu("@(Tag column not found)");
+		RETURN 424;		// Tag not found
+	END
+
+	// check privilege
+	IF (NOT _TabBwsTable_GetPriv(privilege)) THEN
+		disabled = "!";
+	END
+
+	// show menu item(s) only available to single tag
+	IF (TabTable_GetDspSelectedCount(tableID) = 1) THEN
+		tagName = _LibBrowseTable_GetDataRow(tableID, tblRowID, "Tag");
+		IF ("" = tagName) THEN
+			TabBwsTable_ShowDefaultMenu("@(Tag name not found)");
+			RETURN 424;	// Tag not found
+		END
+		IF (LibTable_GetColByRef(tableID, "Cluster") > 0) THEN
+			cluster = _LibBrowseTable_GetDataRow(tableId, tblRowID, "Cluster");
+		END
+		overrideMode = TagRead(tagName + ".OverrideMode", 0, cluster);
+		controlMode = TagRead(tagName + ".ControlMode", 0, cluster);
+		DspPopupMenu(0, disabled + StrToLocalText("@(Set Value)...,,"));
+	END
+
+	// show menu item(s) availabe to one or multiple tags
+	DspPopupMenu(0, StrToLocalText("@(Set Override Mode)>1"));
+	DspPopupMenu(0, StrToLocalText("@(Set Control Mode)>2"));
+
+	_TabTagTable_AddMenuOverrideMode(1, overrideMode, disabled);
+	_TabTagTable_AddMenuControlMode(2, controlMode, disabled);
+	selection = DspPopupMenu(-1);
+
+	// execute command of the selected menu item
+	INT errLevelOld = ErrSetLevel(1);
+	SELECT CASE selection
+	CASE 1
+		newValue = TagRead(tagName, 0, cluster);
+		IsError();
+		newValue = Input("@(Input)", "@(New value for tag:) " + tagName, newValue);
+		error = IsError();
+		IF (0 = error) THEN
+			IF (_TabBwsTable_GetPriv(privilege)) THEN
+				error = TagWrite(tagName, newValue, 0, TRUE, cluster);
+			ELSE
+				error = 276;	// no privilege for operation
+			END
+		END
+		fieldChanged = "Value";
+	CASE 101 TO 200
+		newValue = selection - 101;
+		error = _TabTagTable_TagWrite(tableID, newValue, ".OverrideMode", tagName, cluster, privilege);
+		fieldChanged = "Ovr_Mode";
+	CASE 201 TO 300
+		newValue = selection - 201;
+		error = _TabTagTable_TagWrite(tableID, newValue, ".ControlMode", tagName, cluster, privilege);
+		fieldChanged = "Ctrl_Mode";
+	CASE ELSE
+		error = 0;
+	END SELECT
+	ErrSetLevel(errLevelOld);
+
+	// only reload data on table if the changes affect the display
+	IF (0 = error) THEN
+		IF (fieldChanged <> "" AND LibTable_GetColByRef(tableID, fieldChanged) > 0) THEN
+			LibBrowseTable_ReloadData(tableID);
+		END
+	ELSE
+		// ignore cancel error
+		IF (299 <> error) THEN
+			Message("Error", "[" + IntToStr(error) + "] " + ErrMsg(error), 0);
+		END
+	END
+
+	RETURN error;
+END
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		_TabTagTable_AddMenuOverrideMode
+//
+//	SUMMARY:
+//		Adds the menu items for selecting Override Mode for variable tag.
+//
+//	PARAMS:
+//		menuNo			- The menu number
+//		value			- The current value of the Override Mode
+//							This is optional, if it is not specified or
+//							set to -1, all options become selectable
+//		disabled		- The menu item prefix to indicate whether it should be disabled
+//
+//	RETURNS:
+//		0 if executed successfully or error code if failed
+//
+//-----------------------------------------------------------------------------
+
+PRIVATE
+FUNCTION _TabTagTable_AddMenuOverrideMode(INT menuNo, INT value = -1, STRING disabled = "")
+	STRING checked;
+
+	IF (0 = value) THEN checked = "!~" ELSE checked = disabled END;
+	DspPopupMenu(menuNo, checked + StrToLocalText("0 - @(Override Mode is off)"));
+	IF (1 = value) THEN checked = "!~" ELSE checked = disabled END;
+	DspPopupMenu(menuNo, checked + StrToLocalText("1 - @(Static Mode) - @(Set value to Field value)"));
+	IF (2 = value) THEN checked = "!~" ELSE checked = disabled END;
+	DspPopupMenu(menuNo, checked + StrToLocalText("2 - @(Static Mode) - @(Set value to Valid value)"));
+	IF (3 = value) THEN checked = "!~" ELSE checked = disabled END;
+	DspPopupMenu(menuNo, checked + StrToLocalText("3 - @(Static Mode) - @(Set value to Override value)"));
+	IF (4 = value) THEN checked = "!~" ELSE checked = disabled END;
+	DspPopupMenu(menuNo, checked + StrToLocalText("4 - @(Dynamic Mode) - @(Track value to Valid value continuously)"));
+END
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		_TabTagTable_AddMenuControlMode
+//
+//	SUMMARY:
+//		Adds the menu items for selecting Control Mode for variable tag.
+//
+//	PARAMS:
+//		menuNo			- The menu number
+//		value			- The current value of the Control Mode
+//							This is optional, if it is not specified or
+//							set to -1, all options become selectable
+//		disabled		- The menu item prefix to indicate whether it should be disabled
+//
+//	RETURNS:
+//		0 if executed successfully or error code if failed
+//
+//-----------------------------------------------------------------------------
+
+PRIVATE
+FUNCTION _TabTagTable_AddMenuControlMode(INT menuNo, INT value = -1, STRING disabled = "")
+	STRING checked;
+
+	IF (0 = value) THEN checked = "!~" ELSE checked = disabled END;
+	DspPopupMenu(menuNo, checked + StrToLocalText("0 - @(Allow Control)"));
+	IF (1 = value) THEN checked = "!~" ELSE checked = disabled END;
+	DspPopupMenu(menuNo, checked + StrToLocalText("1 - @(Inhibit Control)"));
+END
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		_TabTagTable_TagWrite
+//
+//	SUMMARY:
+//		Writes the specified value to all the selected tags that are currently
+//		displayed on screen of the browse table.
+//
+//	PARAMS:
+//		tableID			- The table name
+//		value			- The new value to be written to the tag(s)
+//		suffix			- The optional suffix (extension) to the tag name
+//		tagName			- The name of the variable tag, if this is specified
+//							only value of the specified tag will be overwritten
+//							regardless of whether the tag is currently selected
+//		cluster			- The cluster name of the specified tagName, only
+//							relevant if the tagName is specified
+//		privilege		- The privilege required to operate
+//
+//	RETURNS:
+//		0 if executed successfully or error code if failed
+//
+//-----------------------------------------------------------------------------
+
+PRIVATE
+INT FUNCTION _TabTagTable_TagWrite(STRING tableID, STRING value, STRING suffix = "", STRING tagName = "", STRING cluster = "", INT privilege = 0)
+	// check privilege
+	IF (NOT _TabBwsTable_GetPriv(privilege)) THEN
+		RETURN 276;	// no privilege for operation
+	END
+
+	// write to single tag
+	IF ("" <> tagName) THEN
+		RETURN TagWrite(tagName + suffix, value, 0, TRUE, cluster);
+	END
+
+	// wirte to all selected tags that are displayed on screen
+	INT firstDspRow = LibTable_GetPropertyInt(tableID, "RowFirst");
+	INT lastDspRow = firstDspRow + LibTable_GetPropertyInt(tableID, "RowDspUsed") - 1;
+	INT row;
+	INT error = 0;
+	INT newError;
+
+	IF (firstDspRow < 1 OR lastDspRow < firstDspRow) THEN
+		RETURN 274;
+	END
+
+	INT clusterCol = LibTable_GetColByRef(tableID, "Cluster");
+	cluster = "";
+	FOR row = firstDspRow TO lastDspRow DO
+		IF (LibTable_IsRowSelected(tableID, row)) THEN
+			tagName = _LibBrowseTable_GetDataRow(tableID, row, "Tag");
+			IF (clusterCol > 0) THEN
+				cluster = _LibBrowseTable_GetDataRow(tableId, row, "Cluster");
+			END
+			newError = TagWrite(tagName + suffix, value, 0, TRUE, cluster);
+			IF (0 = error) THEN
+				error = newError;
+			END
+		END
+	END
+	RETURN error;
+END
